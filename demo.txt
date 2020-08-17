@@ -1,0 +1,76 @@
+kind create cluster --image kindest/node:v1.16.9 --wait 5m
+
+kubectl create namespace crossplane-system
+helm repo add crossplane-alpha https://charts.crossplane.io/alpha
+helm install crossplane --namespace crossplane-system crossplane-alpha/crossplane
+
+kubectl apply -f clusterrole.yaml
+
+kubectl -n crossplane-system get pod
+
+
+## Azure setup
+PACKAGE=crossplane/provider-azure:v0.10.0
+NAME=provider-azure
+kubectl crossplane package install --cluster --namespace crossplane-system ${PACKAGE} ${NAME}
+
+cp ~/dev/backup/crossplane-azure-provider-key.json ./creds-azure.json
+kubectl create secret generic azure-creds -n crossplane-system --from-file=key=./creds-azure.json
+kubectl apply -f provider-azure.yaml
+
+
+## GCP setup
+PACKAGE=crossplane/provider-gcp:v0.11.0
+NAME=provider-gcp
+kubectl crossplane package install --cluster --namespace crossplane-system ${PACKAGE} ${NAME}
+
+cp ~/dev/backup/crossplane-gcp-provider-key.json ./creds-gcp.json
+kubectl create secret generic gcp-creds -n crossplane-system --from-file=key=./creds-gcp.json
+kubectl apply -f provider-gcp.yaml
+
+
+
+######## Platform API and consumption demo
+
+kubectl apply -f definition.yaml
+kubectl get crd postgresqlinstances.database.example.org
+
+kubectl apply -f publication.yaml
+kubectl get crd postgresqlinstancerequirements.database.example.org
+
+kubectl apply -f composition-bronze.yaml
+kubectl apply -f composition-silver.yaml
+kubectl apply -f composition-platinum.yaml
+kubectl get composition
+
+# create either the bronze Azure postgres requirement, or the silver GCP one
+# kubectl apply -f requirement-silver.yaml
+kubectl apply -f requirement-bronze.yaml
+kubectl -n default get postgresqlinstancerequirement.database.example.org
+
+kubectl get managed
+
+kubectl get secrets db-conn
+
+kubectl apply -f pod.yaml
+kubectl logs see-db
+
+
+
+
+######## clean-up
+kubectl delete -f pod.yaml
+kubectl delete -f requirement-silver.yaml
+kubectl delete -f composition-bronze.yaml
+kubectl delete -f composition-silver.yaml
+kubectl delete -f composition-platinum.yaml
+kubectl delete -f publication.yaml
+kubectl delete -f definition.yaml
+kubectl delete -f clusterrole.yaml
+
+kubectl delete -f provider-azure.yaml
+kubectl delete -f provider-gcp.yaml
+kubectl delete secret -n crossplane-system azure-creds
+kubectl delete secret -n crossplane-system gcp-creds
+
+kind delete cluster --name kind
